@@ -4,6 +4,7 @@
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
+//#include "Floating_Point.h"
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -91,14 +92,21 @@ struct thread
     struct list_elem allelem;           /* List element for all threads list. */
 
     /* Shared between thread.c and synch.c. */
-    struct list_elem elem;              /* List element. */
+    struct list_elem elem;              /* List element. */      
+
 
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */
 #endif
-
+    uint64_t sleepingTime;
     /* Owned by thread.c. */
+    /*<! Added for Periority Scheduler !>*/
+    struct thread *locker;
+    int effectivePriority; 
+    struct lock* waitingOnLock;                                                                                   
+    struct list  AcquireLockList;
+    struct list_elem donorelem;
     unsigned magic;                     /* Detects stack overflow. */
   };
 
@@ -137,5 +145,15 @@ int thread_get_nice (void);
 void thread_set_nice (int);
 int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
+
+
+/*<! Added for Periority Scheduler !>*/
+bool PriorityLockHandler(const struct list_elem *a, const struct list_elem *b, void *aux);
+bool PriorityOfThreadHandler(const struct list_elem *a, const struct list_elem *b, void *aux);
+bool to_compare_thread(const struct list_elem *a, const struct list_elem *b, void *aux);
+
+
+void wake_up_sleeping_thread(struct thread *t, void *aux);
+
 
 #endif /* threads/thread.h */
