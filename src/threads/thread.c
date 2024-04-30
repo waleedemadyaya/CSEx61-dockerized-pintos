@@ -91,24 +91,26 @@ static tid_t allocate_tid (void);
 
 
 
-//PeriorityComparetorHandler
-/*<! Added for Periority Scheduler !>*/
-bool PeriorityOfLockHandler(const struct list_elem *a, const struct list_elem *b, void *aux)
+/* Priority Comparator Handler for locks */
+bool PriorityLockHandler(const struct list_elem *a, const struct list_elem *b, void *aux)
 {
- return list_entry(a , struct lock, lockElem)->PriorityOfLock
-     < list_entry(b , struct lock , lockElem)->PriorityOfLock;
+    return list_entry(a, struct lock, lockElem)->PriorityOfLock < list_entry(b, struct lock, lockElem)->PriorityOfLock;
 }
+
 
 bool to_compare_thread(const struct list_elem *a, const struct list_elem *b, void *aux)
 {
   return ( (list_entry(a ,struct thread , elem)->priority ) > (list_entry(b , struct thread , elem)->priority) );
 }   
 
-/*<! Added for Periority Scheduler !>*/
+/* Comparator function for sorting threads by priority */
 bool PriorityOfThreadHandler(const struct list_elem *a, const struct list_elem *b, void *aux)
 {
-    return (list_entry(a ,struct thread , elem)->priority < list_entry(b , struct thread , elem)->priority);
+    const struct thread *thread_a = list_entry(a, struct thread, elem);
+    const struct thread *thread_b = list_entry(b, struct thread, elem);
+    return thread_a->priority < thread_b->priority;
 }
+
 
 
 void
@@ -191,8 +193,7 @@ thread_print_stats (void)
    PRIORITY, but no actual priority scheduling is implemented.
    Priority scheduling is the goal of Problem 1-3. */
 tid_t
-thread_create (const char *name, int priority,
-               thread_func *function, void *aux)               /////////////////////////////////////////////////
+thread_create (const char *name, int priority, thread_func *function, void *aux)
 {
   struct thread *t;
   struct kernel_thread_frame *kf;
@@ -211,6 +212,8 @@ thread_create (const char *name, int priority,
   init_thread (t, name, priority);
   tid = t->tid = allocate_tid ();
 
+  enum intr_level old_level = intr_disable ();;
+
   /* Stack frame for kernel_thread(). */
   kf = alloc_frame (t, sizeof *kf);
   kf->eip = NULL;
@@ -226,10 +229,13 @@ thread_create (const char *name, int priority,
   sf->eip = switch_entry;
   sf->ebp = 0;
 
+  intr_set_level (old_level);
+
   /* Add to run queue. */
   thread_unblock (t);
-                                         
-  if(priority > thread_current()->priority)
+
+  old_level = intr_disable ();                                
+  if(t->priority > thread_current()->priority)
   {
     /*we should go to schudling */
     thread_yield();
@@ -378,35 +384,41 @@ thread_foreach (thread_action_func *func, void *aux)
 void
 thread_set_priority (int new_priority) 
 {
+  ASSERT (!intr_context ());
+  enum intr_level old_level = intr_disable ();
+
   if(thread_mlfqs == true)
   {
     return;
   }
   else
   {
-    enum intr_level old_level;
-    ASSERT (!intr_context ());
-    old_level = intr_disable ();
-
     struct thread *cur = thread_current();
+
     if(list_empty(&cur->AcquireLockList) == false)
     {
-      struct list_elem *ElemMaxPeriority = list_max(&cur->AcquireLockList, PeriorityOfLockHandler, NULL);
-      struct lock *MaxPeriority = list_entry(ElemMaxPeriority, struct lock, lockElem);
-      
-      if(new_priority > MaxPeriority->PriorityOfLock)
-      {
-        cur->priority = new_priority;
-      }
-      cur->effectivePriority = new_priority;
+        if(new_priority > cur->priority)
+        {
+            cur->priority = new_priority;
+            cur->effectivePriority = new_priority;
+        }
+        else
+            cur->effectivePriority = new_priority;
     }
-    else
+    else if(list_empty(&cur->AcquireLockList) == true)
     {
-      cur->priority = new_priority;
-      cur->effectivePriority = new_priority;
+        cur->priority = new_priority;
+        cur->effectivePriority = new_priority;
     }
 
-    thread_yield();
+    if(list_empty(&ready_list) == false)
+    {
+        struct list_elem *max = list_front(&ready_list);
+        struct thread *maxThread = list_entry(max, struct thread, elem);
+        if(maxThread->priority > cur->priority)
+            thread_yield();
+    }
+    
     intr_set_level (old_level);
   }
 }
@@ -549,11 +561,22 @@ init_thread (struct thread *t, const char *name, int priority)
   t->status = THREAD_BLOCKED;
   strlcpy (t->name, name, sizeof t->name);
   t->stack = (uint8_t *) t + PGSIZE;
-  t->priority = priority;
+
+  if(thread_mlfqs)
+  {
+
+  }
+  else
+  {
+    t->priority = priority;
+  }
+
+  t->locker = NULL;
+  t->magic = THREAD_MAGIC;
+  t->waitingOnLock = NULL;
+  
   t->effectivePriority = priority;  // initialize effectivePriority           
   list_init(&t->AcquireLockList);         
-  t->waitingOnLock = NULL;
-  t->magic = THREAD_MAGIC;
 
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);
@@ -588,7 +611,7 @@ next_thread_to_run (void)                                                       
   {
     return idle_thread;
   }
-  else if (thread_mlfqs == false)
+  else 
   {   
     //put the thread which highest priority to be run  
     struct list_elem *maxPriorityElem = list_max(&ready_list, PriorityOfThreadHandler, NULL);
