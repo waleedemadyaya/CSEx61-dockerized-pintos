@@ -222,7 +222,7 @@ lock_acquire (struct lock *lock)
       cur->waitingOnLock = lock;
 
       struct thread *temp = cur;
-      while (temp->locker)
+      while (temp->locker != NULL)
       {
         if(temp->priority > temp->locker->priority)
         {
@@ -231,6 +231,8 @@ lock_acquire (struct lock *lock)
         }
       }
     }
+    else
+        cur->locker = NULL;
   }
   sema_down (&lock->semaphore);
   lock->holder = thread_current ();

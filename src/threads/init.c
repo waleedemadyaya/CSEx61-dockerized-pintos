@@ -288,13 +288,13 @@ run_task (char **argv)
   process_wait (process_execute (task));
 #else
   
-  printf ("\n\n Before Execution\n\n");
+  //printf ("\n\n Before Execution\n\n");
   
   run_test (task);
 #endif
   printf ("Execution of '%s' complete.\n", task);
 
-  printf ("\n\n After Execution\n\n\n\n");
+  //printf ("\n\n After Execution\n\n\n\n");
 }
 
 /* Executes all of the actions specified in ARGV[]
