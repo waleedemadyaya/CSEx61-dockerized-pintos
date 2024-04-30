@@ -201,7 +201,7 @@ thread_create (const char *name, int priority, thread_func *function, void *aux)
   struct switch_threads_frame *sf;
   tid_t tid;
 
-  ASSERT (function != NULL);
+  //ASSERT (function != NULL);
 
   /* Allocate thread. */
   t = palloc_get_page (PAL_ZERO);
@@ -211,8 +211,6 @@ thread_create (const char *name, int priority, thread_func *function, void *aux)
   /* Initialize thread. */
   init_thread (t, name, priority);
   tid = t->tid = allocate_tid ();
-
-  enum intr_level old_level = intr_disable ();;
 
   /* Stack frame for kernel_thread(). */
   kf = alloc_frame (t, sizeof *kf);
@@ -229,13 +227,10 @@ thread_create (const char *name, int priority, thread_func *function, void *aux)
   sf->eip = switch_entry;
   sf->ebp = 0;
 
-  intr_set_level (old_level);
-
   /* Add to run queue. */
   thread_unblock (t);
-
-  old_level = intr_disable ();                                
-  if(t->priority > thread_current()->priority)
+                                         
+  if(priority > thread_current()->priority)
   {
     /*we should go to schudling */
     thread_yield();
@@ -384,41 +379,35 @@ thread_foreach (thread_action_func *func, void *aux)
 void
 thread_set_priority (int new_priority) 
 {
-  ASSERT (!intr_context ());
-  enum intr_level old_level = intr_disable ();
-
   if(thread_mlfqs == true)
   {
     return;
   }
   else
   {
-    struct thread *cur = thread_current();
+    enum intr_level old_level;
+    ASSERT (!intr_context ());
+    old_level = intr_disable ();
 
+    struct thread *cur = thread_current();
     if(list_empty(&cur->AcquireLockList) == false)
     {
-        if(new_priority > cur->priority)
-        {
-            cur->priority = new_priority;
-            cur->effectivePriority = new_priority;
-        }
-        else
-            cur->effectivePriority = new_priority;
-    }
-    else if(list_empty(&cur->AcquireLockList) == true)
-    {
+      struct list_elem *ElemMaxPeriority = list_max(&cur->AcquireLockList, PriorityLockHandler, NULL);
+      struct lock *MaxPeriority = list_entry(ElemMaxPeriority, struct lock, lockElem);
+      
+      if(new_priority > MaxPeriority->PriorityOfLock)
+      {
         cur->priority = new_priority;
-        cur->effectivePriority = new_priority;
+      }
+      cur->effectivePriority = new_priority;
+    }
+    else
+    {
+      cur->priority = new_priority;
+      cur->effectivePriority = new_priority;
     }
 
-    if(list_empty(&ready_list) == false)
-    {
-        struct list_elem *max = list_front(&ready_list);
-        struct thread *maxThread = list_entry(max, struct thread, elem);
-        if(maxThread->priority > cur->priority)
-            thread_yield();
-    }
-    
+    thread_yield();
     intr_set_level (old_level);
   }
 }
@@ -561,22 +550,11 @@ init_thread (struct thread *t, const char *name, int priority)
   t->status = THREAD_BLOCKED;
   strlcpy (t->name, name, sizeof t->name);
   t->stack = (uint8_t *) t + PGSIZE;
-
-  if(thread_mlfqs)
-  {
-
-  }
-  else
-  {
-    t->priority = priority;
-  }
-
-  t->locker = NULL;
-  t->magic = THREAD_MAGIC;
-  t->waitingOnLock = NULL;
-  
+  t->priority = priority;
   t->effectivePriority = priority;  // initialize effectivePriority           
   list_init(&t->AcquireLockList);         
+  t->waitingOnLock = NULL;
+  t->magic = THREAD_MAGIC;
 
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);
@@ -611,7 +589,7 @@ next_thread_to_run (void)                                                       
   {
     return idle_thread;
   }
-  else 
+  else if (thread_mlfqs == false)
   {   
     //put the thread which highest priority to be run  
     struct list_elem *maxPriorityElem = list_max(&ready_list, PriorityOfThreadHandler, NULL);
