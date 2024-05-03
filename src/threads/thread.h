@@ -107,6 +107,9 @@ struct thread
     struct lock* waitingOnLock;                                                                                   
     struct list  AcquireLockList;
     struct list_elem donorelem;
+
+    int64_t waketick;
+    
     unsigned magic;                     /* Detects stack overflow. */
   };
 

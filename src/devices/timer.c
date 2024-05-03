@@ -7,10 +7,9 @@
 #include "threads/interrupt.h"
 #include "threads/synch.h"
 #include "threads/thread.h"
-#include "lib/kernel/list.h"
+#include <kernel/list.h>
   
 /* See [8254] for hardware details of the 8254 timer chip. */
-
 
 #if TIMER_FREQ < 19
 #error 8254 timer requires TIMER_FREQ >= 19
@@ -18,13 +17,11 @@
 #if TIMER_FREQ > 1000
 #error TIMER_FREQ <= 1000 recommended
 #endif
-struct list sleepy_list; //linked list for sleepy list in sorted form 
-struct lock sleepy_list_lock; //lock for linked list synchronous modification 
-int64_t min_list;
-
 
 /* Number of timer ticks since OS booted. */
 static int64_t ticks;
+
+struct list sleep_list;
 
 /* Number of loops per timer tick.
    Initialized by timer_calibrate(). */
@@ -35,7 +32,6 @@ static bool too_many_loops (unsigned loops);
 static void busy_wait (int64_t loops);
 static void real_time_sleep (int64_t num, int32_t denom);
 static void real_time_delay (int64_t num, int32_t denom);
-static bool cmp_fnc(const struct list_elem *a, const struct list_elem *b, void * aux UNUSED);
 
 /* Sets up the timer to interrupt TIMER_FREQ times per second,
    and registers the corresponding interrupt. */
@@ -44,9 +40,7 @@ timer_init (void)
 {
   pit_configure_channel (0, 2, TIMER_FREQ);
   intr_register_ext (0x20, timer_interrupt, "8254 Timer");
-  list_init(&sleepy_list);
-  lock_init(&sleepy_list_lock);
-  min_list = 0;
+  list_init (&sleep_list);
 }
 
 /* Calibrates loops_per_tick, used to implement brief delays. */
@@ -70,7 +64,7 @@ timer_calibrate (void)
   /* Refine the next 8 bits of loops_per_tick. */
   high_bit = loops_per_tick;
   for (test_bit = high_bit >> 1; test_bit != high_bit >> 10; test_bit >>= 1)
-    if (!too_many_loops (loops_per_tick | test_bit))
+    if (!too_many_loops (high_bit | test_bit))
       loops_per_tick |= test_bit;
 
   printf ("%'"PRIu64" loops/s.\n", (uint64_t) loops_per_tick * TIMER_FREQ);
@@ -99,29 +93,24 @@ timer_elapsed (int64_t then)
 void
 timer_sleep (int64_t ticks) 
 {
-  if(ticks <= 0) return;
-  int64_t start = timer_ticks ();
+
+	struct thread* curthread;
+	enum intr_level curlevel;
 
   ASSERT (intr_get_level () == INTR_ON);
 
-  struct thread* current_running_thread = thread_current();
-  struct semaphore current_running_sema ;
-  struct sleepy_thread_elem cuttent_going_to_sleep;
+  curlevel = intr_disable();
 
-  sema_init (&current_running_sema,0);
+  curthread = thread_current();
 
-  cuttent_going_to_sleep.thread_sema = &current_running_sema;
-  cuttent_going_to_sleep.current_thread = current_running_thread;
-  cuttent_going_to_sleep.tick_to_walke_up = start + ticks;
+  curthread->waketick = timer_ticks() + ticks;
 
-  lock_acquire(&sleepy_list_lock);
-  list_insert_ordered(&sleepy_list, &cuttent_going_to_sleep.list_elem_val,&cmp_fnc,NULL);
-  struct sleepy_thread_elem * current_element_in_list = list_entry(list_begin(&sleepy_list), struct sleepy_thread_elem , list_elem_val);
-  min_list = current_element_in_list->tick_to_walke_up;
-  
-  lock_release(&sleepy_list_lock);
+  list_insert_ordered (&sleep_list, &curthread->elem, PriorityOfThreadHandler, NULL);
 
-  sema_down(&current_running_sema);
+  thread_block();
+
+  intr_set_level(curlevel);
+
 }
 
 /* Sleeps for approximately MS milliseconds.  Interrupts must be
@@ -198,26 +187,24 @@ timer_print_stats (void)
 static void
 timer_interrupt (struct intr_frame *args UNUSED)
 {
+	struct list_elem *head;
+	struct thread *hthread;
+
   ticks++;
+  thread_tick ();
 
-  if(ticks>=min_list)
-  {
-      while(!(list_empty(&sleepy_list)))
-      {
-        struct sleepy_thread_elem * current_element_in_list = list_entry(list_begin(&sleepy_list), struct sleepy_thread_elem , list_elem_val);
-        if(ticks >= current_element_in_list->tick_to_walke_up){
-          sema_up(current_element_in_list->thread_sema);
-          list_pop_front(&sleepy_list);
-          struct sleepy_thread_elem * current_element_in_list = list_entry(list_begin(&sleepy_list), struct sleepy_thread_elem , list_elem_val);
-          min_list =  current_element_in_list->tick_to_walke_up;
-          continue;
-        }
-        break;
-      }
-  }
-  
 
-  thread_tick (); 
+	while(!list_empty(&sleep_list))
+	{
+		head = list_front(&sleep_list);
+	  hthread = list_entry (head, struct thread, elem);
+
+	  	if(hthread->waketick > ticks )
+	  		break;
+
+	  	list_remove (head);
+	  	thread_unblock(hthread);
+	}
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer
@@ -289,12 +276,4 @@ real_time_delay (int64_t num, int32_t denom)
      the possibility of overflow. */
   ASSERT (denom % 1000 == 0);
   busy_wait (loops_per_tick * num / 1000 * TIMER_FREQ / (denom / 1000)); 
-}
-
-static bool
-cmp_fnc(const struct list_elem *a, const struct list_elem *b, void * aux UNUSED)
-{
-  struct sleepy_thread_elem* first = list_entry(a, struct sleepy_thread_elem, list_elem_val);
-  struct sleepy_thread_elem* second = list_entry(b, struct sleepy_thread_elem, list_elem_val);
-  return first->tick_to_walke_up < second->tick_to_walke_up;
 }
