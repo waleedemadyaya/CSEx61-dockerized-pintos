@@ -90,7 +90,7 @@ struct thread
     char name[16];                      /* Name (for debugging purposes). */
     uint8_t *stack;                     /* Saved stack pointer. */
     int priority;                       /* Priority. */
-    int waketick;
+    int tick_to_wakup;
     struct list_elem allelem;           /* List element for all threads list. */
 
     /* Shared between thread.c and synch.c. */
@@ -112,7 +112,7 @@ struct thread
     struct list  AcquireLockList;
     struct list_elem donorelem;
 
-    //int64_t waketick;
+    //int64_t tick_to_wakup;
     
     unsigned magic;                     /* Detects stack overflow. */
 

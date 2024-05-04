@@ -7,10 +7,9 @@
 #include "threads/interrupt.h"
 #include "threads/synch.h"
 #include "threads/thread.h"
-#include "lib/kernel/list.h"
+#include <kernel/list.h>
   
 /* See [8254] for hardware details of the 8254 timer chip. */
-
 
 #if TIMER_FREQ < 19
 #error 8254 timer requires TIMER_FREQ >= 19
@@ -19,13 +18,10 @@
 #error TIMER_FREQ <= 1000 recommended
 #endif
 
-
-
-
 /* Number of timer ticks since OS booted. */
 static int64_t ticks;
 
-struct list sleep_list;
+struct list sleepy_threads_list;
 
 /* Number of loops per timer tick.
    Initialized by timer_calibrate(). */
@@ -36,7 +32,8 @@ static bool too_many_loops (unsigned loops);
 static void busy_wait (int64_t loops);
 static void real_time_sleep (int64_t num, int32_t denom);
 static void real_time_delay (int64_t num, int32_t denom);
-//static bool cmp_fnc(const struct list_elem *a, const struct list_elem *b, void * aux UNUSED);
+
+bool cmp_tick_to_wakup(struct list_elem *first, struct list_elem *second, void *aux);
 
 /* Sets up the timer to interrupt TIMER_FREQ times per second,
    and registers the corresponding interrupt. */
@@ -45,7 +42,7 @@ timer_init (void)
 {
   pit_configure_channel (0, 2, TIMER_FREQ);
   intr_register_ext (0x20, timer_interrupt, "8254 Timer");
-  list_init (&sleep_list);
+  list_init (&sleepy_threads_list);
 }
 
 /* Calibrates loops_per_tick, used to implement brief delays. */
@@ -99,22 +96,22 @@ void
 timer_sleep (int64_t ticks) 
 {
 
-	struct thread* curthread;
-	enum intr_level curlevel;
+	struct thread* curr_running_thread;
+	enum intr_level curr_interrupt_level;
 
   ASSERT (intr_get_level () == INTR_ON);
 
-  curlevel = intr_disable();
+  curr_interrupt_level = intr_disable();
 
-  curthread = thread_current();
+  curr_running_thread = thread_current();
 
-  curthread->waketick = timer_ticks() + ticks;
+  curr_running_thread->tick_to_wakup = timer_ticks() + ticks;
 
-  list_insert_ordered (&sleep_list, &curthread->elem, PriorityOfThreadHandler, NULL);
+  list_insert_ordered (&sleepy_threads_list, &curr_running_thread->elem, cmp_tick_to_wakup, NULL);
 
   thread_block();
 
-  intr_set_level(curlevel);
+  intr_set_level(curr_interrupt_level);
 
 }
 
@@ -188,7 +185,6 @@ timer_print_stats (void)
   printf ("Timer: %"PRId64" ticks\n", timer_ticks ());
 }
 
-/****************************************************************************************************/
 /* Timer interrupt handler. */
 static void
 timer_interrupt (struct intr_frame *args UNUSED)
@@ -200,12 +196,12 @@ timer_interrupt (struct intr_frame *args UNUSED)
   thread_tick ();
 
 
-	while(!list_empty(&sleep_list))
+	while(!list_empty(&sleepy_threads_list))
 	{
-		head = list_front(&sleep_list);
+		head = list_front(&sleepy_threads_list);
 	  hthread = list_entry (head, struct thread, elem);
 
-	  	if(hthread->waketick > ticks )
+	  	if(hthread->tick_to_wakup > ticks )
 	  		break;
 
 	  	list_remove (head);
@@ -284,3 +280,11 @@ real_time_delay (int64_t num, int32_t denom)
   busy_wait (loops_per_tick * num / 1000 * TIMER_FREQ / (denom / 1000)); 
 }
 
+bool cmp_tick_to_wakup(struct list_elem *first, struct list_elem *second, void *aux)
+{
+  struct thread *fthread = list_entry (first, struct thread, elem);
+  struct thread *sthread = list_entry (second, struct thread, elem);
+
+  return fthread->tick_to_wakup < sthread->tick_to_wakup;
+
+}
