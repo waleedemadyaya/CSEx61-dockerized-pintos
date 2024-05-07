@@ -212,6 +212,76 @@ static int wait(pid_t pid)
 }
 
 
+
+
+/* Writes SIZE bytes from buffer to the open file FD. Returns the
+    number of bytes actually written, which may be less than SIZE if
+    some bytes could not be written.
+
+    Writing past end-of-file would normally extend the file, but file
+    growth is not implemented by the basic file system. The expected
+    behavior is to write as many bytes as possible up to end-of-file
+    and return the actual number written, or 0 if no bytes could be
+    written at all.
+
+    Fd 1 writes to the console. The code to write to the console should
+    write all of buffer in one call to putbuf(), at least as long as SIZE
+    is not bigger than a few hundred bytes. (It is reasonable to break up
+    larger buffers.) Otherwise, lines of text output by different processes
+    may end up interleaved on the console, confusing both human readers and
+    the grading scripts. */
+static int write(int fd, const void *buffer, unsigned length){
+
+    // Check if buffer is valid user memory and if fd is not STDIN_FILENO
+    USER_ASSERT(is_user_mem(buffer, length));
+    USER_ASSERT(fd != STDIN_FILENO);
+
+    // If writing to STDOUT_FILENO (console)
+    if (fd == STDOUT_FILENO)
+    {
+      // Write buffer to console using putbuf
+      putbuf((const char *)buffer, length);
+      return length;  // Return the number of bytes written
+    }
+
+    // If writing to a regular file
+    struct open_file *f = get_file_by_fd(fd); // Get the file struct by fd
+    
+    // Acquire lock to ensure exclusive access to files
+    lock_acquire(&file_lock);
+    // Write to file using file_write
+    int bytes_written  = file_write(f->file, buffer, length);
+    // Release lock
+    lock_release(&file_lock);
+
+  return bytes_written;
+}
+
+
+/* Creates a new file called FILE initially INITIAL_SIZE bytes in size.
+    Returns true if successful, false otherwise. Creating a new file
+    does not open it: opening the new file is a separate operation which
+    would require a open system call. */
+static bool create(const char *file, unsigned initial_size){
+  // Check if file pointer is valid
+  USER_ASSERT(is_valid_str(file));
+
+  // Acquire file lock to ensure exclusive access to file system
+    lock_acquire(&file_lock);
+
+  // Create the file using filesys_create
+  bool success = filesys_create(file, initial_size);
+
+  // Release file lock
+  lock_release(&file_lock);
+
+  return success; // Return true if successful, false otherwise
+}
+
+
+
+
+
 /* Returns true if PTR is not a null pointer,
     a pointer to kernel virtual address space
     or a pointer to unmapped virtual memory. */
