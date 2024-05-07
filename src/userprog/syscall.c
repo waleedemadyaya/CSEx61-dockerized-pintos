@@ -279,6 +279,168 @@ static bool create(const char *file, unsigned initial_size){
 }
 
 
+static bool remove(const char *file) {
+    // Check if file pointer is valid
+    USER_ASSERT(is_valid_str(file));
+
+    // Acquire file lock to ensure exclusive access to file system
+    lock_acquire(&file_lock);
+
+    // Remove the file using filesys_remove
+    bool success = filesys_remove(file);
+
+    // Release file lock
+    lock_release(&file_lock);
+
+    return success; // Return true if successful, false otherwise
+}
+
+
+static int open(const char *file){
+  // Check if file pointer is valid
+  USER_ASSERT(is_valid_str(file));
+
+  // Acquire file lock to ensure exclusive access to file system
+  lock_acquire(&file_lock);
+  // Open the file using filesys_open
+  struct file *opened_file = filesys_open(file);
+  // Release file lock
+  lock_release(&file_lock);
+
+  // If file couldn't be opened, return -1
+  if (opened_file == NULL)
+    return -1;
+
+
+  struct process *current = thread_current()->process;                  //Edit
+
+  // Otherwise, create a new entry for the file descriptor
+  struct open_file *new_open_file = malloc(sizeof(struct open_file));
+
+  if (new_open_file == NULL) {
+    file_close(opened_file); // Close the file if memory allocation failed
+    return -1;
+  }
+
+  // Populate the new open file entry
+  new_open_file->fd = current->fd++;
+  new_open_file->file = opened_file;
+
+  // Add the new open file entry to the current process's file list
+  list_push_back(&current->files, &new_open_file->elem);
+
+  // Return the file descriptor
+  return new_open_file->fd;
+
+}
+
+
+static int filesize(int fd){
+  // Find the file associated with the file descriptor
+  struct open_file *file = get_file_by_fd(fd);
+
+  if (file == NULL || file->file == NULL)
+    return -1; // Return -1 if file descriptor is invalid or file is not open
+
+  // Acquire file lock to ensure exclusive access to file
+  lock_acquire(&file_lock);
+
+  // Get the size of the file using file_length
+  int size = file_length(file->file);
+
+  // Release file lock
+  lock_release(&file_lock);
+
+  return size; // Return the size of the file
+
+}
+
+static int read(int fd, void *buffer, unsigned length){
+  // Check if buffer pointer is valid
+  USER_ASSERT(is_user_mem(buffer, length));
+  USER_ASSERT(fd != STDOUT_FILENO);
+
+  // If reading from the keyboard (stdin)
+  if (fd == STDIN_FILENO) {
+    uint8_t *buf = buffer;
+    unsigned i;
+    for (i = 0; i < length; i++) {
+      buf[i] = input_getc(); // Read character from keyboard
+      if (buf[i] == '\0')
+      break;
+    }
+    return i; // Return the number of bytes actually read
+  }
+
+  // Find the file associated with the file descriptor
+  struct open_file *file = get_file_by_fd(fd);
+  if (file == NULL || file->file == NULL)
+    return -1; // Return -1 if file descriptor is invalid or file is not open
+
+  // Acquire file lock to ensure exclusive access to file
+  lock_acquire(&file_lock);
+  // Read from file into buffer using file_read
+  int bytes_read = file_read(file->file, buffer, length);
+  // Release file lock
+  lock_release(&file_lock);
+
+  return bytes_read; // Return the number of bytes actually read
+
+}
+
+
+static void seek(int fd, unsigned position) {
+    // Find the file associated with the file descriptor
+    struct open_file *file = get_file_by_fd(fd);
+    if (file == NULL || file->file == NULL)
+        return; // Do nothing if file descriptor is invalid or file is not open
+
+    // Acquire file lock to ensure exclusive access to file
+    lock_acquire(&file_lock);
+    // Seek to the specified position using file_seek
+    file_seek(file->file, position);
+    // Release file lock
+    lock_release(&file_lock);
+}
+
+
+static unsigned tell(int fd) {
+    // Find the file associated with the file descriptor
+    struct open_file *file = get_file_by_fd(fd);
+    if (file == NULL || file->file == NULL)
+        return -1; // Return -1 if file descriptor is invalid or file is not open
+
+    // Acquire file lock to ensure exclusive access to file
+    lock_acquire(&file_lock);
+    // Get the current position within the file using file_tell
+    unsigned position = file_tell(file->file);
+    // Release file lock
+    lock_release(&file_lock);
+
+    return position; // Return the current position within the file
+}
+
+
+static void close(int fd) {
+    // Find the file associated with the file descriptor
+    struct open_file *file = get_file_by_fd(fd);
+    if (file == NULL || file->file == NULL)
+        return; // Do nothing if file descriptor is invalid or file is not open
+
+    // Acquire file lock to ensure exclusive access to file
+    lock_acquire(&file_lock);
+    // Close the file using file_close
+    file_close(file->file);
+    // Remove the open file entry from the process's file list
+    list_remove(&file->elem);
+    // Free the open file entry
+    free(file);
+    // Release file lock
+    lock_release(&file_lock);
+}
+
+
+
 
 
 
