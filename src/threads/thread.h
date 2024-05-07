@@ -5,6 +5,8 @@
 #include <list.h>
 #include <stdint.h>
 
+#define USERPROG
+
 /* States in a thread's life cycle. */
 enum thread_status
   {
@@ -94,8 +96,9 @@ struct thread
     struct list_elem elem;              /* List element. */
 
 #ifdef USERPROG
-    /* Owned by userprog/process.c. */
-    uint32_t *pagedir;                  /* Page directory. */
+     /* Owned by userprog/process.c. */
+    struct process *process; /* Pointer to struct process. */
+    uint32_t *pagedir;       /* Page directory. */
 #endif
 
     /* Owned by thread.c. */

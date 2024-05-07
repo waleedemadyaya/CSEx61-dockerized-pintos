@@ -197,9 +197,17 @@ thread_create (const char *name, int priority,
   sf = alloc_frame (t, sizeof *sf);
   sf->eip = switch_entry;
   sf->ebp = 0;
+// Added for system calls
+#ifdef USERPROG
+    t->process = process_create(t);
+    if (t->process == NULL)
+        return TID_ERROR;
+#endif
 
   /* Add to run queue. */
   thread_unblock (t);
+
+  thread_yield();
 
   return tid;
 }
