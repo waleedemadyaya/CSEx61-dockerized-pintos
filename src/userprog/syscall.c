@@ -482,3 +482,15 @@ static bool is_valid_str(const char *str)//for ensuring that a string pointer po
     return true;
 }
   
+  static struct open_file *get_file_by_fd(const int fd){
+    struct list *l = &thread_current()->process->files;
+
+    for (struct list_elem *e = list_begin(l); e != list_end(l); e = list_next(e))
+    {
+        struct open_file *f = list_entry(e, struct open_file, elem);
+        if (f->fd == fd)
+            return f;
+    }
+
+    USER_ASSERT(false);
+  }
