@@ -19,7 +19,7 @@
 #include "threads/vaddr.h"
 
 static thread_func start_process NO_RETURN;
-void get_stack_args(char *file_name, void **esp, char **save_ptr)ك
+void get_stack_args(char *file_name, void **esp, char **save_ptr);
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
 
 /* Starts a new thread running a user program loaded from
