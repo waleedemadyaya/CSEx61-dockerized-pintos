@@ -19,6 +19,7 @@
 #include "threads/vaddr.h"
 
 static thread_func start_process NO_RETURN;
+void get_stack_args(char *file_name, void **esp, char **save_ptr)ك
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
 
 /* Starts a new thread running a user program loaded from
@@ -29,8 +30,13 @@ tid_t
 process_execute (const char *file_name) 
 {
   char *fn_copy;
+  char *save_ptr;
+  char *name;
   tid_t tid;
-
+  
+  name = malloc(strlen(file_name)+1);
+    strlcpy (name, file_name, strlen(file_name)+1);
+    name = strtok_r (name," ",&save_ptr);
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
   fn_copy = palloc_get_page (0);
@@ -88,7 +94,11 @@ start_process (void *file_name_)
 int
 process_wait (tid_t child_tid UNUSED) 
 {
-  return -1;
+  //return -1;
+  while(true)
+  {
+    thread_yield();
+  }
 }
 
 /* Free the current process's resources. */
@@ -214,6 +224,9 @@ load (const char *file_name, void (**eip) (void), void **esp)
   off_t file_ofs;
   bool success = false;
   int i;
+  /*declare for arguments*/
+  char *fn_copy;
+    char *save_ptr;
 
   /* Allocate and activate page directory. */
   t->pagedir = pagedir_create ();
@@ -222,7 +235,13 @@ load (const char *file_name, void (**eip) (void), void **esp)
   process_activate ();
 
   /* Open executable file. */
-  file = filesys_open (file_name);
+  int name_length = strlen (file_name)+1;
+    fn_copy = malloc (name_length);
+    strlcpy(fn_copy, file_name, name_length);
+    fn_copy = strtok_r (fn_copy, " ", &save_ptr);
+
+    file = filesys_open (fn_copy);
+
   if (file == NULL) 
     {
       printf ("load: %s: open failed\n", file_name);
@@ -304,6 +323,8 @@ load (const char *file_name, void (**eip) (void), void **esp)
   /* Set up stack. */
   if (!setup_stack (esp))
     goto done;
+  get_stack_args (fn_copy, esp, &save_ptr);
+  free(fn_copy);
 
   /* Start address. */
   *eip = (void (*) (void)) ehdr.e_entry;
@@ -317,6 +338,74 @@ load (const char *file_name, void (**eip) (void), void **esp)
 }
 
 /* load() helpers. */
+/*get stack arguments*/
+static
+void get_stack_args(char *file_name, void **esp, char **save_ptr)
+{
+
+    char *token = file_name;
+    void *stack_pointer = *esp;
+    int argc = 0;
+    int total_length = 0;
+    /*split and insert in the stack
+     * /bin/ls -l foo bar
+     * /bin/ls
+     * -l
+     * foo
+     * bar*/
+    while (token != NULL)
+    {
+        int arg_length = (strlen(token) + 1);
+        total_length += arg_length;
+        stack_pointer -= arg_length;
+        memcpy(stack_pointer, token, arg_length);
+        argc++;
+        token = strtok_r(NULL, " ", save_ptr);
+    }
+
+    char *args_pointer = (char *) stack_pointer;
+
+    /*adding word align*/
+    int  word_align = 0;
+    while (total_length % 4 != 0)
+    {
+        word_align++;
+        total_length++;
+    }
+    if (word_align != 0)
+    {
+        stack_pointer -= word_align;
+        memset(stack_pointer, 0, word_align);
+    }
+
+    /*adding null char*/
+    stack_pointer -= sizeof(char *);
+    memset(stack_pointer, 0, 1);
+
+    /*adding argument address*/
+    int args_pushed = 0;
+    while(argc > args_pushed)
+    {
+        stack_pointer -= sizeof(char *);
+        *((char **) stack_pointer) = args_pointer;
+        args_pushed++;
+        args_pointer += (strlen(args_pointer) + 1);
+    }
+
+    /*adding char** */
+    char ** first_fetch = (char **) stack_pointer;
+    stack_pointer -= sizeof(char **);
+    *((char ***) stack_pointer) = first_fetch;
+
+    /*adding number of arrguments*/
+    stack_pointer -= sizeof(int);
+    *(int *) (stack_pointer) = argc;
+
+    /*adding return address*/
+    stack_pointer -= sizeof(int*);
+    *(int *) (stack_pointer) = 0;
+    *esp = stack_pointer;
+}
 
 static bool install_page (void *upage, void *kpage, bool writable);
 
@@ -427,7 +516,7 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 /* Create a minimal stack by mapping a zeroed page at the top of
    user virtual memory. */
 static bool
-setup_stack (void **esp) 
+setup_stack (void **esp, char* arg[]) 
 {
   uint8_t *kpage;
   bool success = false;
@@ -437,7 +526,22 @@ setup_stack (void **esp)
     {
       success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
       if (success)
-        *esp = PHYS_BASE;
+       *esp = PHYS_BASE;
+       /*int array[];
+       int index;
+       for(int i=lenth(arg) ;i>=0 ;--i)
+       {
+        *esp=arg[i];
+        index = lenth(arg) -i ;  
+        array[index]=esp;
+        esp--;
+       }
+
+       for(int j=0 ;j<=lenth(arg) ;++i)
+       {
+        array[index]
+       }
+          */
       else
         palloc_free_page (kpage);
     }
