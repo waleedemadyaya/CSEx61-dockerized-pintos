@@ -19,7 +19,7 @@
 #include "threads/vaddr.h"
 
 static thread_func start_process NO_RETURN;
-void get_stack_args(char *file_name, void **esp, char **save_ptr);
+static void get_stack_args(char *file_name, void **esp, char **save_ptr);
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
 
 /* Starts a new thread running a user program loaded from
@@ -516,7 +516,7 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 /* Create a minimal stack by mapping a zeroed page at the top of
    user virtual memory. */
 static bool
-setup_stack (void **esp, char* arg[]) 
+setup_stack (void **esp) 
 {
   uint8_t *kpage;
   bool success = false;
