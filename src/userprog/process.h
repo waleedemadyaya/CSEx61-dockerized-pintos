@@ -21,6 +21,22 @@ enum process_status
     PROCESS_EXITED,  /* Exited normally. */
 };
 
+typedef int pid_t;
+
+
+typedef void (*ret_addr_t)(void);
+
+typedef union
+{
+    void *vp;
+    char *cp;
+    unsigned u;
+    char **cpp;
+    char ***cppp;
+    int *ip;
+    ret_addr_t *rap;
+} esp_t;
+
 /* Contains the infos that should not be discarded when thread exit. */
 struct process
 {
@@ -44,9 +60,9 @@ int process_wait (tid_t);
 void process_exit (void);
 void process_activate (void);
 
-void process_init(void);
-struct process *process_create(struct thread *t);
-struct process *get_process(pid_t pid);
-struct process *get_child(pid_t pid);
+struct process *GetProcess(pid_t pid);
+struct process *CreateProcess(struct thread *t);
+struct process *GetChild(pid_t pid);
+static void *ArgumentPassed(esp_t esp, char *cmd, char *save_ptr);
 
 #endif /* userprog/process.h */

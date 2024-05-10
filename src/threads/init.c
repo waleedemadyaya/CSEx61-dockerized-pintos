@@ -76,6 +76,8 @@ int main (void) NO_RETURN;
 int
 main (void)
 {
+  ready_to_run = false;
+
   char **argv;
 
   /* Clear BSS. */  
@@ -284,6 +286,8 @@ run_task (char **argv)
   const char *task = argv[1];
   
   printf ("Executing '%s':\n", task);
+  ready_to_run = true;
+  
 #ifdef USERPROG
   process_wait (process_execute (task));
 #else

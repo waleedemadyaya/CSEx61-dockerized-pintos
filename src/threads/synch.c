@@ -31,6 +31,21 @@
 #include <string.h>
 #include "threads/interrupt.h"
 #include "threads/thread.h"
+#include "threads/init.h"
+
+
+struct thread *thread_pop_highest_priority(struct list *list)
+{
+    struct list_elem *tmp = list_max(list, thread_cmp_elem, NULL);
+    list_remove(tmp);
+    return list_entry(tmp, struct thread, elem);
+}
+
+bool thread_cmp_elem(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED)
+{
+    return list_entry(a, struct thread, elem)->priority < list_entry(b, struct thread, elem)->priority;
+}
+
 
 /* Initializes semaphore SEMA to VALUE.  A semaphore is a
    nonnegative integer along with two atomic operators for
@@ -114,10 +129,14 @@ sema_up (struct semaphore *sema)
 
   old_level = intr_disable ();
   if (!list_empty (&sema->waiters)) 
-    thread_unblock (list_entry (list_pop_front (&sema->waiters),
-                                struct thread, elem));
+  {
+      thread_unblock(thread_pop_highest_priority(&sema->waiters));
+  }
   sema->value++;
   intr_set_level (old_level);
+
+  if (ready_to_run && !intr_context())
+    thread_yield();
 }
 
 static void sema_test_helper (void *sema_);
