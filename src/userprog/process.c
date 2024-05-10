@@ -115,7 +115,9 @@ struct process *GetChild(pid_t pid)
 }
 
 static thread_func start_process NO_RETURN;
+static void get_stack_args(char *file_name, void **esp, char **save_ptr);
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
+
 
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
@@ -220,7 +222,7 @@ start_process (void *file_name_)
      we just point the stack pointer (%esp) to our stack frame
      and jump to it. */
   asm volatile ("movl %0, %%esp; jmp intr_exit" : : "g" (&if_) : "memory");
-  NOT_REACHED ();
+  NOT_REACHED();
 }
 
 /* Waits for thread TID to die and returns its exit status.  If
@@ -235,6 +237,7 @@ start_process (void *file_name_)
 int
 process_wait (tid_t child_tid UNUSED) 
 {
+  //return -1;
   while(1)
   {
       thread_yield();
@@ -366,6 +369,10 @@ load (const char *file_name, void (**eip) (void), void **esp)
   bool success = false;
   int i;
 
+  /*declare for arguments*/
+  char *fn_copy;
+  char *save_ptr;
+
   /* Allocate and activate page directory. */
   t->pagedir = pagedir_create ();
   if (t->pagedir == NULL) 
@@ -373,7 +380,12 @@ load (const char *file_name, void (**eip) (void), void **esp)
   process_activate ();
 
   /* Open executable file. */
-  file = filesys_open (file_name);
+  int name_length = strlen (file_name)+1;
+  fn_copy = malloc (name_length);
+  strlcpy(fn_copy, file_name, name_length);
+  fn_copy = strtok_r (fn_copy, " ", &save_ptr);
+  file = filesys_open (fn_copy);
+
   if (file == NULL) 
     {
       printf ("load: %s: open failed\n", file_name);
@@ -381,13 +393,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
     }
 
   /* Read and verify executable header. */
-  if (file_read (file, &ehdr, sizeof ehdr) != sizeof ehdr
-      || memcmp (ehdr.e_ident, "\177ELF\1\1\1", 7)
-      || ehdr.e_type != 2
-      || ehdr.e_machine != 3
-      || ehdr.e_version != 1
-      || ehdr.e_phentsize != sizeof (struct Elf32_Phdr)
-      || ehdr.e_phnum > 1024) 
+    if (file_read(file, &ehdr, sizeof ehdr) != sizeof ehdr || memcmp(ehdr.e_ident, "\177ELF\1\1\1", 7) || ehdr.e_type != 2 || ehdr.e_machine != 3 || ehdr.e_version != 1 || ehdr.e_phentsize != sizeof(struct Elf32_Phdr) || ehdr.e_phnum > 1024)
     {
       printf ("load: %s: error loading executable\n", file_name);
       goto done; 
@@ -455,6 +461,8 @@ load (const char *file_name, void (**eip) (void), void **esp)
   /* Set up stack. */
   if (!setup_stack (esp))
     goto done;
+  get_stack_args (fn_copy, esp, &save_ptr);
+  free(fn_copy);
 
   /* Start address. */
   *eip = (void (*) (void)) ehdr.e_entry;
@@ -466,8 +474,79 @@ load (const char *file_name, void (**eip) (void), void **esp)
   file_close (file);
   return success;
 }
+
+
 
 /* load() helpers. */
+/*get stack arguments*/
+static
+void get_stack_args(char *file_name, void **esp, char **save_ptr)
+{
+
+    char *token = file_name;
+    void *stack_pointer = *esp;
+    int argc = 0;
+    int total_length = 0;
+    /*split and insert in the stack
+     * /bin/ls -l foo bar
+     * /bin/ls
+     * -l
+     * foo
+     * bar*/
+    while (token != NULL)
+    {
+        int arg_length = (strlen(token) + 1);
+        total_length += arg_length;
+        stack_pointer -= arg_length;
+        memcpy(stack_pointer, token, arg_length);
+        argc++;
+        token = strtok_r(NULL, " ", save_ptr);
+    }
+
+    char *args_pointer = (char *) stack_pointer;
+
+    /*adding word align*/
+    int  word_align = 0;
+    while (total_length % 4 != 0)
+    {
+        word_align++;
+        total_length++;
+    }
+    if (word_align != 0)
+    {
+        stack_pointer -= word_align;
+        memset(stack_pointer, 0, word_align);
+    }
+
+    /*adding null char*/
+    stack_pointer -= sizeof(char *);
+    memset(stack_pointer, 0, 1);
+
+    /*adding argument address*/
+    int args_pushed = 0;
+    while(argc > args_pushed)
+    {
+        stack_pointer -= sizeof(char *);
+        *((char **) stack_pointer) = args_pointer;
+        args_pushed++;
+        args_pointer += (strlen(args_pointer) + 1);
+    }
+
+    /*adding char** */
+    char ** first_fetch = (char **) stack_pointer;
+    stack_pointer -= sizeof(char **);
+    *((char ***) stack_pointer) = first_fetch;
+
+    /*adding number of arrguments*/
+    stack_pointer -= sizeof(int);
+    *(int *) (stack_pointer) = argc;
+
+    /*adding return address*/
+    stack_pointer -= sizeof(int*);
+    *(int *) (stack_pointer) = 0;
+    *esp = stack_pointer;
+}
+
 
 static bool install_page (void *upage, void *kpage, bool writable);
 
