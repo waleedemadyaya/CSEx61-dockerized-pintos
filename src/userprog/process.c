@@ -18,6 +18,34 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 
+/* All User Processes List */
+static struct list all_list;
+static int processNumber = 1;
+enum
+{
+    PROCESS_NUM_LIMIT = 32
+};
+
+
+/* Get struct process in ALL_LIST by pid. */
+struct process *GetProcess(pid_t pid)
+{
+    ASSERT(pid != TID_ERROR);
+
+    struct list *list = &all_list;
+
+    for (struct list_elem *elem = list_begin(list); elem != list_end(list); elem = list_next(elem))
+    {
+        struct process *proc = list_entry(elem, struct process, allelem);
+        if (proc->pid == pid)
+            return proc;
+    }
+
+    NOT_REACHED();
+}
+
+
+
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
 
@@ -28,20 +56,52 @@ static bool load (const char *cmdline, void (**eip) (void), void **esp);
 tid_t
 process_execute (const char *file_name) 
 {
-  char *fn_copy;
+  if(PROCESS_NUM_LIMIT == processNumber)
+  {
+    return TID_ERROR;
+  }
+
+  processNumber++;
+  char *fn_copy_0, *fn_copy_1;
   tid_t tid;
+
+
+  /* Make a copy of FILE_NAME.
+     Otherwise strtok_r will modify the const char *file_name. */
+  fn_copy_0 = palloc_get_page (0);
+  if (fn_copy_0 == NULL)
+    return TID_ERROR;
 
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
-  fn_copy = palloc_get_page (0);
-  if (fn_copy == NULL)
+  fn_copy_1 = palloc_get_page (0);
+  if (fn_copy_1 == NULL)
+  {
+    palloc_free_page(fn_copy_0);
     return TID_ERROR;
-  strlcpy (fn_copy, file_name, PGSIZE);
+  }
+
+  strlcpy (fn_copy_0, file_name, PGSIZE);
+  strlcpy (fn_copy_1, file_name, PGSIZE);
 
   /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
+  char *ptr;
+  char *cmdPtr = strtok_r(fn_copy_0, " ", &ptr);
+  tid = thread_create (cmdPtr, PRI_DEFAULT, start_process, fn_copy_1);
   if (tid == TID_ERROR)
-    palloc_free_page (fn_copy); 
+    palloc_free_page (fn_copy_1); 
+
+  palloc_free_page(fn_copy_0);
+
+  struct thread * cur = thread_current();
+  if((cur->tid != 1) && (tid != TID_ERROR))
+  {
+    struct process *parent = cur->process;
+    struct process *child = GetProcess(tid);
+    child->parent = parent;
+    list_push_back(&parent->children, &child->elem);
+  }
+
   return tid;
 }
 
@@ -88,6 +148,10 @@ start_process (void *file_name_)
 int
 process_wait (tid_t child_tid UNUSED) 
 {
+  while(1)
+  {
+      thread_yield();
+  }
   return -1;
 }
 
