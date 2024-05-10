@@ -27,6 +27,36 @@ enum
 };
 
 
+static void *ArgumentPassed(esp_t esp, char *cmd, char *save_ptr)
+{
+    char *args[1024];
+    size_t i = 0;
+    for (char *arg=cmd ; arg!=NULL ; arg=strtok_r(NULL, " ", &save_ptr))
+    {
+        size_t size = strlen(arg) + 1;
+        esp.cp -= size;
+        strlcpy(esp.cp, arg, size);
+        args[i++] = esp.cp;
+    }
+
+    int argc = i;
+    args[i++] = NULL;
+
+    esp.u -= esp.u % 4;   /* Push word-align. */
+
+    /* Push argv[i]. */
+    esp.cpp -= i;
+    memcpy(esp.cpp, args, i * sizeof(char *));
+    char **argv = esp.cpp;
+
+    *(--esp.cppp) = argv;   /* Push argv. */
+    *(--esp.ip) = argc;     /* Push argc. */
+    *(--esp.rap) = NULL;    /* Push fake return address. */
+
+    return esp.vp;
+}
+
+
 /* Get struct process in ALL_LIST by pid. */
 struct process *GetProcess(pid_t pid)
 {
@@ -45,6 +75,44 @@ struct process *GetProcess(pid_t pid)
 }
 
 
+struct process *CreateProcess(struct thread *t)
+{
+    struct process *proc = palloc_get_page(PAL_ZERO);
+    if (proc == NULL)
+        return NULL;
+
+    proc->thread = t;
+    proc->pid = t->tid;
+    proc->status = PROCESS_LOADING;
+    proc->exit_code = -1;
+
+    list_push_back(&all_list, &proc->allelem);
+    list_init(&proc->children);
+    proc->parent = NULL;
+
+    sema_init(&proc->sema_load, 0);
+    sema_init(&proc->sema_wait, 0);
+
+    list_init(&proc->files);
+    proc->fd = 2;
+
+    return proc;
+}
+
+struct process *GetChild(pid_t pid)
+{
+    ASSERT(pid != TID_ERROR);
+    struct list *list = &thread_current()->process->children;
+    for (struct list_elem *element = list_begin(list); element != list_end(list); element = list_next(element))
+    {
+        struct process *proc = list_entry(element, struct process, elem);
+        if (proc->pid == pid)
+        {
+            return proc;
+        }
+    }
+    return NULL;
+}
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
@@ -119,12 +187,31 @@ start_process (void *file_name_)
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
-  success = load (file_name, &if_.eip, &if_.esp);
+
+  char *ptr;
+  char *cmd = strtok_r(file_name, " ", &ptr);
+  success = load (cmd, &if_.eip, &if_.esp);
+
+  if(success)
+  {
+      if_.esp = ArgumentPassed((esp_t)if_.esp, cmd, ptr);
+      struct process *proc = thread_current()->process;
+      proc->status = PROCESS_NORMAL;
+      proc->file = filesys_open(cmd);
+      file_deny_write(proc->file);
+      sema_up(&proc->sema_load);
+  }
 
   /* If load failed, quit. */
   palloc_free_page (file_name);
+
   if (!success) 
-    thread_exit ();
+  {
+      struct process *proc = thread_current()->process;
+      proc->status = PROCESS_FAILED;
+      sema_up(&proc->sema_load);
+      thread_exit();
+  }
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in

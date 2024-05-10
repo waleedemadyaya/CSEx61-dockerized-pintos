@@ -59,7 +59,8 @@ void process_exit (void);
 void process_activate (void);
 
 struct process *GetProcess(pid_t pid);
-static void *arg_pass(esp_t esp, char *cmd, char *save_ptr);
-static void ProcessLoad(const char *cmd);
+struct process *CreateProcess(struct thread *t);
+struct process *GetChild(pid_t pid);
+static void *ArgumentPassed(esp_t esp, char *cmd, char *save_ptr);
 
 #endif /* userprog/process.h */
