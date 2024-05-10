@@ -6,6 +6,7 @@
 #include "threads/synch.h"
 #include "filesys/file.h"
 #include "filesys/filesys.h"
+#include "threads/thread.h"
 
 #define PROCESS_NUM_LIMIT  32
 

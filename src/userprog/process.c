@@ -150,7 +150,13 @@ start_process (void *file_name_)
    does nothing. */
 int
 process_wait (tid_t child_tid UNUSED) 
-{ // added all
+{ 
+
+  // while(true){
+  //   thread_yield();
+  // }
+  // return -1;
+  // added all
     bool cur_state = thread_current()->tid == 1; // if it is 1 then it is the first process in the system
     //  checking if the current thread is the main thread
     struct process *child = cur_state ? get_process(child_tid) : get_child(child_tid);
